@@ -7,7 +7,6 @@ import setproctitle
 import numpy as np
 from pathlib import Path
 import torch
-
 import os, sys
 
 sys.path.append(os.path.abspath(os.getcwd()))
@@ -293,13 +292,12 @@ def main(args):
     }
 
 
-
     # run experiments
     from training.Runner import GMPERunner as Runner
 
 
     runner = Runner(config)
-    exit()
+
     if all_args.verbose:
         print_box("Actor Network", 80)
         if type(runner.policy) == list:

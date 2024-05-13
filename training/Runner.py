@@ -5,6 +5,7 @@ from typing import Tuple
 import torch
 import wandb
 import imageio
+from .Buffer import GraphReplayBuffer
 
 
 def _t2n(x):
@@ -73,8 +74,6 @@ class Runner(object):
                     os.makedirs(self.save_dir)
 
 
-        print("the arguments used here are:" "env_name", self.env_name, "algorithm_name", self.algorithm_name, "experiment_name", self.experiment_name, "use_centralized_V", self.use_centralized_V, "use_obs_instead_of_state", self.use_obs_instead_of_state, "num_env_steps", self.num_env_steps, "episode_length", self.episode_length, "n_rollout_threads", self.n_rollout_threads, "n_eval_rollout_threads", self.n_eval_rollout_threads, "n_render_rollout_threads", self.n_render_rollout_threads, "use_linear_lr_decay", self.use_linear_lr_decay, "hidden_size", self.hidden_size, "use_wandb", self.use_wandb, "use_render", self.use_render, "recurrent_N", self.recurrent_N, "save_interval", self.save_interval, "use_eval", self.use_eval, "eval_interval", self.eval_interval, "log_interval", self.log_interval, "model_dir", self.model_dir)
-
         from .GRMAPPO import GR_MAPPO as TrainAlgo
         from .GRMAPPOPolicy import GR_MAPPOPolicy as Policy
 
@@ -94,7 +93,6 @@ class Runner(object):
             self.envs.action_space[0],
             device=self.device,
         )
-
         if self.model_dir is not None:
             print(f"Restoring from checkpoint stored in {self.model_dir}")
             self.restore()
@@ -115,7 +113,7 @@ class Runner(object):
             self.envs.adj_observation_space[0],
             self.envs.action_space[0],
         )
-
+        
     def run(self):
         """Collect training data, perform training updates, and evaluate policy."""
         raise NotImplementedError
@@ -314,7 +312,6 @@ class GMPERunner(Runner):
 
     def run(self):
         self.warmup()
-
         start = time.time()
         episodes = (
             int(self.num_env_steps) // self.episode_length // self.n_rollout_threads
@@ -395,8 +392,12 @@ class GMPERunner(Runner):
 
     def warmup(self):
         # reset env
+        print("Warm up")
         obs, agent_id, node_obs, adj = self.envs.reset()
-
+        print("Obs",obs.shape)
+        print("agent_id",agent_id.shape)
+        print("node_obs",node_obs.shape)
+        print("adj",adj.shape)
         # replay buffer
         if self.use_centralized_V:
             # (n_rollout_threads, n_agents, feats) -> (n_rollout_threads, n_agents*feats)
@@ -419,7 +420,6 @@ class GMPERunner(Runner):
         self.buffer.adj[0] = adj.copy()
         self.buffer.agent_id[0] = agent_id.copy()
         self.buffer.share_agent_id[0] = share_agent_id.copy()
-
     @torch.no_grad()
     def collect(self, step: int) -> Tuple[arr, arr, arr, arr, arr, arr]:
         self.trainer.prep_rollout()
@@ -597,7 +597,8 @@ class GMPERunner(Runner):
                     np.eye(self.eval_envs.action_space[0].n)[eval_actions], 2
                 )
             else:
-                raise NotImplementedError
+                eval_actions_env=eval_actions
+
 
             # Obser reward and next obs
             (

@@ -58,6 +58,7 @@ class GR_MAPPOPolicy:
         self.split_batch = args.split_batch
         self.max_batch_size = args.max_batch_size
 
+
         self.actor = GR_Actor(
             args,
             self.obs_space,

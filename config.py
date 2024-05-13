@@ -231,7 +231,7 @@ def get_config():
     parser.add_argument(
         "--num_env_steps",
         type=int,
-        default=1000,
+        default=10e6,
         help="Number of environment steps to train (default: 10e6)",
     )
     parser.add_argument(
@@ -260,7 +260,7 @@ def get_config():
     parser.add_argument(
         "--use_obs_instead_of_state",
         action="store_true",
-        default=False,
+        default=True,
         help="Whether to use global state or concatenated obs",
     )
     parser.add_argument(
@@ -344,7 +344,7 @@ def get_config():
     parser.add_argument(
         "--layer_N",
         type=int,
-        default=1,
+        default=0,
         help="Number of layers for actor/critic networks",
     )
     parser.add_argument(
@@ -517,7 +517,7 @@ def get_config():
     parser.add_argument(
         "--use_policy_active_masks",
         action="store_false",
-        default=True,
+        default=False,
         help="by default True, whether to mask " "useless data in policy loss.",
     )
     parser.add_argument(
@@ -707,7 +707,7 @@ def graph_config(args, parser):
     parser.add_argument(
         "--actor_graph_aggr",
         type=str,
-        default="node",
+        default="global",
         choices=["global", "node"],
         help="Whether we want to "
         "pull node specific features from the output or perform "

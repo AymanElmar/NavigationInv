@@ -2,18 +2,7 @@ import gym
 import torch
 from torch import Tensor
 import torch.nn as nn
-print(torch.version.cuda)
-print(torch.__version__ )
 import torch
-try:
-    import torch_geometric
-except ModuleNotFoundError:
-    TORCH = torch.__version__.split("+")[0]
-    CUDA = "cu" + torch.version.cuda.replace(".","")
-
-!pip install torch-scatter     -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
-!pip install torch-sparse      -f https://pytorch-geometric.com/whl/torch-{TORCH}+{CUDA}.html
-!pip install torch-geometric
 
 import torch_geometric
 import math
@@ -28,12 +17,16 @@ from torch_geometric.utils import add_self_loops, to_dense_batch
 import argparse
 from typing import List, Tuple, Union, Optional
 from torch_geometric.typing import OptPairTensor, Adj, OptTensor, Size
+import copy
+from .distributions import Categorical, DiagGaussian, Bernoulli
+from .util import init, get_clones 
 
 
-def init(module: nn.Module, weight_init, bias_init, gain: float = 1):
-    weight_init(module.weight.data, gain=gain)
-    bias_init(module.bias.data)
-    return module
+
+def check(input):
+    output = torch.from_numpy(input) if type(input) == np.ndarray else input
+    return output
+
 
 
 def get_shape_from_obs_space(obs_space):
@@ -266,7 +259,7 @@ class TransformerConvNet(nn.Module):
             in_channels=embed_hidden_size,
             out_channels=hidden_size,
             heads=num_heads,
-            concat=concat_heads,
+            concat=concat_heads,    
             beta=False,
             dropout=0.0,
             edge_dim=edge_dim,
@@ -307,7 +300,6 @@ class TransformerConvNet(nn.Module):
         data = next(iter(loader))
         x, edge_index, edge_attr = data.x, data.edge_index, data.edge_attr
         batch = data.batch
-
         if self.edge_dim is None:
             edge_attr = None
 
@@ -320,11 +312,9 @@ class TransformerConvNet(nn.Module):
         # forward pass conv layers
         for i in range(len(self.gnn2)):
             x = self.active_func(self.gnn2[i](x, edge_index, edge_attr))
-
         # x is of shape [batch_size*num_nodes, out_channels]
         # convert to [batch_size, num_nodes, out_channels]
         x, mask = to_dense_batch(x, batch)
-
         # only pull the node-specific features from output
         if self.graph_aggr == "node":
             x = self.gatherNodeFeats(x, agent_id)  # shape [batch_size, out_channels]
@@ -375,14 +365,12 @@ class TransformerConvNet(nn.Module):
         # filter far away nodes and connection to itself
         connect_mask = ((adj < self.max_edge_dist) * (adj > 0)).float()
         adj = adj * connect_mask
-
         index = adj.nonzero(as_tuple=True)
         edge_attr = adj[index]
 
         if len(index) == 3:
             batch = index[0] * adj.size(-1)
             index = (batch + index[1], batch + index[2])
-
         return torch.stack(index, dim=0), edge_attr
 
     def gatherNodeFeats(self, x: Tensor, idx: Tensor):
@@ -406,6 +394,8 @@ class TransformerConvNet(nn.Module):
         out = []
         batch_size, num_nodes, num_feats = x.shape
         idx = idx.long()
+
+
         for i in range(idx.shape[1]):
             idx_tmp = idx[:, i].unsqueeze(-1)  # (batch_size, 1)
             assert idx_tmp.shape == (batch_size, 1)
@@ -417,7 +407,6 @@ class TransformerConvNet(nn.Module):
             out.append(gathered_node)
         out = torch.cat(out, dim=1)  # (batch_size, out_channels*k)
         # out = out.squeeze(1)    # (batch_size, out_channels*k)
-
         return out
 
     def graphAggr(self, x: Tensor):
@@ -591,7 +580,6 @@ class MLPBase(nn.Module):
         if override_obs_dim is None:
             obs_dim = obs_shape[0]
         else:
-            print("Overriding Observation dimension")
             obs_dim = override_obs_dim
 
         if self._use_feature_normalization:
@@ -710,35 +698,9 @@ class ACTLayer(nn.Module):
         self.mixed_action = False
         self.multi_discrete = False
 
-        if action_space.__class__.__name__ == "Discrete":
-            action_dim = action_space.n
-            self.action_out = Categorical(inputs_dim, action_dim, use_orthogonal, gain)
-        elif action_space.__class__.__name__ == "Box":
-            action_dim = action_space.shape[0]
-            self.action_out = DiagGaussian(inputs_dim, action_dim, use_orthogonal, gain)
-        elif action_space.__class__.__name__ == "MultiBinary":
-            action_dim = action_space.shape[0]
-            self.action_out = Bernoulli(inputs_dim, action_dim, use_orthogonal, gain)
-        elif action_space.__class__.__name__ == "MultiDiscrete":
-            self.multi_discrete = True
-            action_dims = action_space.high - action_space.low + 1
-            self.action_outs = []
-            for action_dim in action_dims:
-                self.action_outs.append(
-                    Categorical(inputs_dim, action_dim, use_orthogonal, gain)
-                )
-            self.action_outs = nn.ModuleList(self.action_outs)
-        else:  # discrete + continous
-            self.mixed_action = True
-            continous_dim = action_space[0].shape[0]
-            discrete_dim = action_space[1].n
-            self.action_outs = nn.ModuleList(
-                [
-                    DiagGaussian(inputs_dim, continous_dim, use_orthogonal, gain),
-                    Categorical(inputs_dim, discrete_dim, use_orthogonal, gain),
-                ]
-            )
-
+        action_dim = action_space.shape[0]
+        self.action_out = DiagGaussian(inputs_dim, action_dim, use_orthogonal, gain)
+        
     def forward(
         self,
         x: torch.tensor,
@@ -789,10 +751,9 @@ class ACTLayer(nn.Module):
             action_log_probs = torch.cat(action_log_probs, -1)
 
         else:
-            action_logits = self.action_out(x, available_actions)
+            action_logits = self.action_out(x)
             actions = action_logits.mode() if deterministic else action_logits.sample()
             action_log_probs = action_logits.log_probs(actions)
-
         return actions, action_log_probs
 
     def get_probs(
@@ -816,7 +777,7 @@ class ACTLayer(nn.Module):
                 action_probs.append(action_prob)
             action_probs = torch.cat(action_probs, -1)
         else:
-            action_logits = self.action_out(x, available_actions)
+            action_logits = self.action_out(x)
             action_probs = action_logits.probs
 
         return action_probs
@@ -894,7 +855,7 @@ class ACTLayer(nn.Module):
             dist_entropy = torch.tensor(dist_entropy).mean()
 
         else:
-            action_logits = self.action_out(x, available_actions)
+            action_logits = self.action_out(x)
             action_log_probs = action_logits.log_probs(action)
             if active_masks is not None:
                 dist_entropy = (
@@ -975,7 +936,6 @@ class GR_Actor(nn.Module):
             1
         ]  # returns (num_nodes, num_node_feats)
         edge_dim = get_shape_from_obs_space(edge_obs_space)[0]  # returns (edge_dim,)
-
         self.gnn_base = GNNBase(args, node_obs_shape, edge_dim, args.actor_graph_aggr)
         gnn_out_dim = self.gnn_base.out_dim  # output shape from gnns
         mlp_base_in_dim = gnn_out_dim + obs_shape[0]
@@ -988,7 +948,6 @@ class GR_Actor(nn.Module):
                 self._recurrent_N,
                 self._use_orthogonal,
             )
-
         self.act = ACTLayer(
             action_space, self.hidden_size, self._use_orthogonal, self._gain
         )
@@ -1070,7 +1029,6 @@ class GR_Actor(nn.Module):
         actions, action_log_probs = self.act(
             actor_features, available_actions, deterministic
         )
-
         return (actions, action_log_probs, rnn_states)
 
     def evaluate_actions(
@@ -1303,7 +1261,6 @@ class GR_Critic(nn.Module):
         if self._use_naive_recurrent_policy or self._use_recurrent_policy:
             critic_features, rnn_states = self.rnn(critic_features, rnn_states, masks)
         values = self.v_out(critic_features)
-
         return (values, rnn_states)
 
 class PopArt(torch.nn.Module):

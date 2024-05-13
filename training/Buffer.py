@@ -139,7 +139,7 @@ class GraphReplayBuffer(object):
                 num_agents,
                 *agent_id_shape,
             ),
-            dtype=np.int,
+            dtype=int,
         )
         self.share_agent_id = np.zeros(
             (
@@ -148,7 +148,7 @@ class GraphReplayBuffer(object):
                 num_agents,
                 *share_agent_id_shape,
             ),
-            dtype=np.int,
+            dtype=int,
         )
         ####################
 

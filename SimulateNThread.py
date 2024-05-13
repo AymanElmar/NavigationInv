@@ -47,12 +47,12 @@ if __name__ == '__main__':
 
 
     nthrd = make_train_env(all_args)
+    
     print(nthrd.observation_space)
     print(nthrd.action_space)
     print(nthrd.action_space[0])
     # create multiagent environment
     # render call to create viewer window
-    nthrd.render()
     class random_policy:
         def __init__(self, env, agent_id):
             self.env = env
@@ -78,7 +78,6 @@ if __name__ == '__main__':
         except:
             pass
         obs_stack, agent_id_stack, node_obs_stack, adj_stack, reward_stack, done_stack, info_stack = nthrd.step_wait()
-        nthrd.render()
         stp += 1
         if stp > 100: 
             print("action shape:", np.array(act_stack).shape)
