@@ -7,7 +7,7 @@ class Args:
         self.num_agents: int = 5
         self.world_size = 2
         self.num_scripted_agents = 0
-        self.num_obstacles: int = 3
+        self.num_obstacles: int = 0
         self.collaborative: bool = False
         self.max_speed: Optional[float] = 2
         self.collision_rew: float = 5
@@ -17,6 +17,7 @@ class Args:
         self.episode_length: int = 250
         self.max_edge_dist: float = 1
         self.graph_feat_type: str = "global"
+        self.only_nav: bool = True
 
 args = Args()
 

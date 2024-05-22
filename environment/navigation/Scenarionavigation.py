@@ -76,6 +76,7 @@ class Scenario(BaseScenario):
         self.goal_rew = args.goal_rew
         self.min_dist_thresh = args.min_dist_thresh
         self.use_dones = args.use_dones
+        self.only_nav = args.only_nav
         if not hasattr(args, "max_edge_dist"):
             self.max_edge_dist = 1
             print("_" * 60)
@@ -99,7 +100,7 @@ class Scenario(BaseScenario):
         world.times_required = -1 * np.ones(self.num_agents)
         # set any world properties
         world.dim_c = 2
-        num_landmarks = self.num_agents  # no. of goals equal to no. of agents
+        num_landmarks = (self.num_agents if args.only_nav==False else 0) # no. of goals equal to no. of agents
         num_scripted_agents_goals = self.num_scripted_agents
         world.collaborative = args.collaborative
         # add agents
@@ -237,8 +238,12 @@ class Scenario(BaseScenario):
         # and also check collisions with already placed goals
         num_goals_added = 0
         goals_added = []
+        if self.only_nav == False:
+            num_goals=self.num_agents
+        else:
+            num_goals=0
         while True:
-            if num_goals_added == self.num_agents:
+            if num_goals_added == num_goals:
                 break
             random_pos = 0.8 * np.random.uniform(
                 -self.world_size / 2, self.world_size / 2, world.dim_p
@@ -255,7 +260,7 @@ class Scenario(BaseScenario):
         #####################################################
 
         ############ find minimum times to goals ############
-        if self.max_speed is not None:
+        if self.max_speed is not None and self.only_nav == False:
             for agent in world.agents:
                 self.min_time(agent, world)
         #####################################################
@@ -269,12 +274,15 @@ class Scenario(BaseScenario):
         rew = 0
         collisions = 0
         occupied_landmarks = 0
-        goal = world.get_entity("landmark", agent.id)
-        dist = np.sqrt(np.sum(np.square(agent.state.p_pos - goal.state.p_pos)))
-        world.dist_left_to_goal[agent.id] = dist
-        # only update times_required for the first time it reaches the goal
-        if dist < self.min_dist_thresh and (world.times_required[agent.id] == -1):
-            world.times_required[agent.id] = world.current_time_step * world.dt
+        world.dist_left_to_goal[agent.id]= None
+        world.times_required[agent.id]= None
+        if self.only_nav == False:
+            goal = world.get_entity("landmark", agent.id)
+            dist = np.sqrt(np.sum(np.square(agent.state.p_pos - goal.state.p_pos)))
+            world.dist_left_to_goal[agent.id] = dist
+            # only update times_required for the first time it reaches the goal
+            if dist < self.min_dist_thresh and (world.times_required[agent.id] == -1):
+                world.times_required[agent.id] = world.current_time_step * world.dt
 
         if agent.collide:
             if self.is_obstacle_collision(agent.state.p_pos, agent.size, world):
@@ -292,7 +300,7 @@ class Scenario(BaseScenario):
             "Num_agent_collisions": world.num_agent_collisions[agent.id],
             "Num_obst_collisions": world.num_obstacle_collisions[agent.id],
         }
-        if self.max_speed is not None:
+        if self.max_speed is not None and self.only_nav == False:
             agent_info["Min_time_to_goal"] = agent.goal_min_time
         return agent_info
 
@@ -372,14 +380,15 @@ class Scenario(BaseScenario):
         # Agents are rewarded based on distance to
         # its landmark, penalized for collisions
         rew = 0
-        agents_goal = world.get_entity(entity_type="landmark", id=agent.id)
-        dist_to_goal = np.sqrt(
-            np.sum(np.square(agent.state.p_pos - agents_goal.state.p_pos))
-        )
-        if dist_to_goal < self.min_dist_thresh:
-            rew += self.goal_rew
-        else:
-            rew -= dist_to_goal
+        if self.only_nav == False:
+            agents_goal = world.get_entity(entity_type="landmark", id=agent.id)
+            dist_to_goal = np.sqrt(
+                np.sum(np.square(agent.state.p_pos - agents_goal.state.p_pos))
+            )
+            if dist_to_goal < self.min_dist_thresh:
+                rew += self.goal_rew
+            else:
+                rew -= dist_to_goal
         if agent.collide:
             for a in world.agents:
                 # do not consider collision with itself
@@ -401,9 +410,12 @@ class Scenario(BaseScenario):
         """
         # get positions of all entities in this agent's reference frame
         goal_pos = []
-        agents_goal = world.get_entity("landmark", agent.id)
-        goal_pos.append(agents_goal.state.p_pos - agent.state.p_pos)
-        return np.concatenate([agent.state.p_vel, agent.state.p_pos] + goal_pos)
+        if self.only_nav == False:
+            agents_goal = world.get_entity("landmark", agent.id)
+            goal_pos.append(agents_goal.state.p_pos - agent.state.p_pos)
+            return np.concatenate([agent.state.p_vel, agent.state.p_pos] + goal_pos)
+        else:
+            return np.concatenate([agent.state.p_vel, agent.state.p_pos])
 
     def get_id(self, agent: Agent) -> arr:
         return np.array([agent.global_id])
@@ -476,7 +488,8 @@ class Scenario(BaseScenario):
         pos = entity.state.p_pos
         vel = entity.state.p_vel
         if "agent" in entity.name:
-            goal_pos = world.get_entity("landmark", entity.id).state.p_pos
+            if self.only_nav == False:
+                goal_pos = world.get_entity("landmark", entity.id).state.p_pos
             entity_type = entity_mapping["agent"]
         elif "landmark" in entity.name:
             goal_pos = pos
@@ -486,8 +499,12 @@ class Scenario(BaseScenario):
             entity_type = entity_mapping["obstacle"]
         else:
             raise ValueError(f"{entity.name} not supported")
+        if self.only_nav == False:
+            return np.hstack([vel, pos, goal_pos, entity_type])
+        else:
+            return np.hstack([pos,entity_type])
 
-        return np.hstack([vel, pos, goal_pos, entity_type])
+
 
     def _get_entity_feat_relative(
         self, agent: Agent, entity: Entity, world: World
@@ -503,7 +520,8 @@ class Scenario(BaseScenario):
         rel_pos = entity_pos - agent_pos
         rel_vel = entity_vel - agent_vel
         if "agent" in entity.name:
-            goal_pos = world.get_entity("landmark", entity.id).state.p_pos
+            if self.only_nav == False:
+                goal_pos = world.get_entity("landmark", entity.id).state.p_pos
             rel_goal_pos = goal_pos - agent_pos
             entity_type = entity_mapping["agent"]
         elif "landmark" in entity.name:
@@ -514,6 +532,7 @@ class Scenario(BaseScenario):
             entity_type = entity_mapping["obstacle"]
         else:
             raise ValueError(f"{entity.name} not supported")
-
-        return np.hstack([rel_vel, rel_pos, rel_goal_pos, entity_type])
-
+        if self.only_nav == False:
+            return np.hstack([rel_vel, rel_pos, rel_goal_pos, entity_type])
+        else:
+            return np.hstack([rel_pos, entity_type])

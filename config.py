@@ -171,6 +171,13 @@ def get_config():
         description="onpolicy", formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
+     # added parameters
+    parser.add_argument(
+        "--only_nav",
+        type=lambda x: bool(strtobool(x)),
+        default=False,
+        help="whether to just test the navigation aspect of the simulation",
+    )
     # prepare parameters
     parser.add_argument(
         "--algorithm_name", type=str, default="rmappo", choices=["rmappo", "mappo"]
@@ -231,7 +238,7 @@ def get_config():
     parser.add_argument(
         "--num_env_steps",
         type=int,
-        default=10e6,
+        default=10e4,
         help="Number of environment steps to train (default: 10e6)",
     )
     parser.add_argument(
